@@ -1,4 +1,4 @@
-package main
+package dawg
 
 import (
 	"encoding/binary"
@@ -17,6 +17,10 @@ func NewGuide() *Guide {
 func (guide *Guide) setUnits(units []GuideUnit) {
 	guide.units = units
 	guide.size = len(units)
+}
+
+func (guide *Guide) Size() sizeType {
+	return guide.size
 }
 
 func (guide *Guide) TotalSize() sizeType {

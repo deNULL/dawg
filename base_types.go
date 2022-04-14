@@ -1,4 +1,4 @@
-package main
+package dawg
 
 import "math"
 
@@ -9,7 +9,7 @@ type ucharType = uint8
 // 32-bit integer.
 type valueType = int32
 
-const maxValue = math.MaxInt32
+const MaxValue = math.MaxInt32
 
 // 32-bit unsigned integer.
 type baseType = uint32

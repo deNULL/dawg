@@ -1,4 +1,4 @@
-package main
+package dawg
 
 // Number of units in a block.
 const blockSize = 256
@@ -69,7 +69,7 @@ func (db *DictionaryBuilder) BuildDictionary() bool {
 	dictSetOffset(&db.units[0], 1)
 	dictSetLabel(&db.units[0], 0)
 
-	if db.dawg.size() > 1 {
+	if db.dawg.Size() > 1 {
 		if !db.buildDictionaryIndices(db.dawg.Root(), 0) {
 			return false
 		}

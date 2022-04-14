@@ -1,4 +1,4 @@
-package main
+package dawg
 
 import (
 	"container/heap"

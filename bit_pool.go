@@ -1,4 +1,4 @@
-package main
+package dawg
 
 const bitBlockSize = 1 << 10
 

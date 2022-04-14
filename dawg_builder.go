@@ -1,4 +1,4 @@
-package main
+package dawg
 
 const defaultInitialHashTableSize = 1 << 8
 

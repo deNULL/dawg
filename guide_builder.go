@@ -1,4 +1,4 @@
-package main
+package dawg
 
 type GuideBuilder struct {
 	dawg  *Dawg
@@ -30,7 +30,7 @@ func (gb *GuideBuilder) Build() bool {
 	gb.units = make([]GuideUnit, gb.dict.size)
 	gb.isFixedTable = make([]ucharType, gb.dict.size/8)
 
-	if gb.dawg.size() <= 1 {
+	if gb.dawg.Size() <= 1 {
 		return true
 	}
 

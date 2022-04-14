@@ -1,4 +1,4 @@
-package main
+package dawg
 
 import "sort"
 
@@ -34,7 +34,7 @@ func (rgb *RankedGuideBuilder) Build(valuesCmp valueComparatorFunc) bool {
 	rgb.units = make([]RankedGuideUnit, rgb.dict.size)
 	rgb.isFixedTable = make([]ucharType, rgb.dict.size/8)
 
-	if rgb.dawg.size() <= 1 {
+	if rgb.dawg.Size() <= 1 {
 		return true
 	}
 

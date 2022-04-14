@@ -1,4 +1,4 @@
-package main
+package dawg
 
 import (
 	"encoding/binary"
@@ -17,6 +17,10 @@ func NewRankedGuide() *RankedGuide {
 func (rg *RankedGuide) setUnits(units []GuideUnit) {
 	rg.units = units
 	rg.size = len(units)
+}
+
+func (rg *RankedGuide) Size() sizeType {
+	return rg.size
 }
 
 func (rg *RankedGuide) TotalSize() sizeType {

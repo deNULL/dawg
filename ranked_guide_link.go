@@ -1,4 +1,4 @@
-package main
+package dawg
 
 type RankedGuideLink struct {
 	label ucharType

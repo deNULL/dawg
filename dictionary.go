@@ -1,4 +1,4 @@
-package main
+package dawg
 
 import (
 	"encoding/binary"
@@ -17,6 +17,10 @@ func NewDictionary() *Dictionary {
 func (dict *Dictionary) setUnits(units []DictionaryUnit) {
 	dict.units = units
 	dict.size = len(units)
+}
+
+func (dict *Dictionary) Size() sizeType {
+	return dict.size
 }
 
 func (dict *Dictionary) TotalSize() sizeType {
@@ -151,7 +155,7 @@ func (dict *Dictionary) Follow(label ucharType, index *baseType) bool {
 
 // Follows transitions.
 func (dict *Dictionary) FollowString(key string, index *baseType) bool {
-	for i := 0; i < len(key) && key[i] != 0; i++ {
+	for i := 0; i < len(key); i++ {
 		if !dict.Follow(key[i], index) {
 			return false
 		}
@@ -159,7 +163,7 @@ func (dict *Dictionary) FollowString(key string, index *baseType) bool {
 	return true
 }
 func (dict *Dictionary) FollowStringCount(key string, index *baseType, count *sizeType) bool {
-	for i := 0; i < len(key) && key[i] != 0; i++ {
+	for i := 0; i < len(key); i++ {
 		if !dict.Follow(key[i], index) {
 			return false
 		}

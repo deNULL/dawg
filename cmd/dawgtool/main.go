@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/deNULL/dawg"
 )
 
 var optTab bool
@@ -25,7 +27,7 @@ var fileLexicon *os.File
 var fileDictionary *os.File
 var scanner *bufio.Scanner
 
-var builder *DawgBuilder
+var builder *dawg.DawgBuilder
 
 func processLine(line string) bool {
 	if len(line) == 0 {
@@ -35,7 +37,7 @@ func processLine(line string) bool {
 	//fmt.Printf("inserting %s: %v\n", line, Encode(line))
 
 	var key string = line
-	var val valueType = 0
+	var val int32 = 0
 	if optTab {
 		parts := strings.Split(line, "\t")
 		key = parts[0]
@@ -46,18 +48,18 @@ func processLine(line string) bool {
 		if value < 0 {
 			fmt.Printf("warning: negative value is replaced by 0: %d\n", value)
 			value = 0
-		} else if value > maxValue {
-			fmt.Printf("warning: too large value is replaced by %d\n", maxValue)
-			value = maxValue
+		} else if value > dawg.MaxValue {
+			fmt.Printf("warning: too large value is replaced by %d\n", dawg.MaxValue)
+			value = dawg.MaxValue
 		}
-		val = valueType(value)
+		val = int32(value)
 	}
 
-	var bytes []ucharType
+	var bytes []uint8
 	if optUtfc {
-		bytes = Encode(key)
+		bytes = dawg.UtfcEncode(key)
 	} else {
-		bytes = []ucharType(key)
+		bytes = []uint8(key)
 	}
 	if !builder.InsertKeyValue(bytes, len(bytes), val) {
 		//fmt.Printf("key %s: %v", line, bytes)
@@ -68,7 +70,7 @@ func processLine(line string) bool {
 }
 
 func handleBuildDict() {
-	builder = NewDawgBuilder()
+	builder = dawg.NewDawgBuilder()
 
 	var keyCount int = 0
 	if optSort {
@@ -80,8 +82,8 @@ func handleBuildDict() {
 			if !optUtfc {
 				return buffer[i] < buffer[j]
 			}
-			bytes1 := Encode(buffer[i])
-			bytes2 := Encode(buffer[j])
+			bytes1 := dawg.UtfcEncode(buffer[i])
+			bytes2 := dawg.UtfcEncode(buffer[j])
 			length := len(bytes1)
 			if len(bytes2) < length {
 				length = len(bytes2)
@@ -119,27 +121,31 @@ func handleBuildDict() {
 		}
 	}
 
-	dawg := NewDawg()
-	builder.Finish(dawg)
+	d := dawg.NewDawg()
+	builder.Finish(d)
 
 	fmt.Printf("no. keys: %d\n", keyCount)
-	fmt.Printf("no. states: %d\n", dawg.numOfStates)
-	fmt.Printf("no. transitions: %d\n", dawg.numOfTransitions())
-	fmt.Printf("no. merged states: %d\n", dawg.numOfMergedStates)
-	fmt.Printf("no. merging states: %d\n", dawg.numOfMergingStates)
-	fmt.Printf("no. merged transitions: %d\n", dawg.numOfMergedTransitions)
+	fmt.Printf("no. states: %d\n", d.NumOfStates())
+	fmt.Printf("no. transitions: %d\n", d.NumOfTransitions())
+	fmt.Printf("no. merged states: %d\n", d.NumOfMergedStates())
+	fmt.Printf("no. merging states: %d\n", d.NumOfMergingStates())
+	fmt.Printf("no. merged transitions: %d\n", d.NumOfMergedTransitions())
 
-	var numOfUnusedUnits baseType
-	dict := dawg.BuildWithUnused(&numOfUnusedUnits)
+	var numOfUnusedUnits uint32
+	dict := d.BuildWithUnused(&numOfUnusedUnits)
 	if dict == nil {
 		log.Fatalf("error: failed to build dictionary\n")
 	}
 
-	var unusedRatio float64 = 100.0 * float64(numOfUnusedUnits) / float64(dict.size)
+	var unusedRatio float64 = 100.0 * float64(numOfUnusedUnits) / float64(dict.Size())
 
-	fmt.Printf("no. elements: %d\n", dict.size)
+	fmt.Printf("no. elements: %d\n", dict.Size())
 	fmt.Printf("no. unused elements: %d (%.2f%%)\n", numOfUnusedUnits, unusedRatio)
 	fmt.Printf("dictionary size: %d\n", dict.TotalSize())
+
+	/*for i := 0; i < dict.size; i++ {
+		fmt.Printf("%.2d: %.8x leaf? %v ext? %v hleaf? %v label? %d (%c) offset = %d => %d, value = %d\n", i, dict.units[i], dictIsLeaf(dict.units[i]), dictHasExtBit(dict.units[i]), dictHasLeaf(dict.units[i]), dictLabel(dict.units[i]), dictLabel(dict.units[i]), dictOffset(dict.units[i]), dictOffset(dict.units[i])^baseType(i), dictValue(dict.units[i]))
+	}*/
 
 	if !dict.Write(fileDictionary) {
 		log.Fatalf("error: failed to write Dictionary")
@@ -147,24 +153,24 @@ func handleBuildDict() {
 
 	// Builds a guide
 	if optRanked {
-		guide := BuildRankedGuide(dawg, dict)
+		guide := dawg.BuildRankedGuide(d, dict)
 		if guide == nil {
 			log.Fatalf("error: failed to build Guide\n")
 		}
 
-		fmt.Printf("no. units: %d\n", guide.size)
+		fmt.Printf("no. units: %d\n", guide.Size())
 		fmt.Printf("guide size: %d\n", guide.TotalSize())
 
 		if !guide.Write(fileDictionary) {
 			log.Fatalf("error: failed to write RankedGuide\n")
 		}
 	} else if optGuide {
-		guide := BuildGuide(dawg, dict)
+		guide := dawg.BuildGuide(d, dict)
 		if guide == nil {
 			log.Fatalf("error: failed to build Guide\n")
 		}
 
-		fmt.Printf("no. units: %d\n", guide.size)
+		fmt.Printf("no. units: %d\n", guide.Size())
 		fmt.Printf("guide size: %d\n", guide.TotalSize())
 
 		if !guide.Write(fileDictionary) {
@@ -174,31 +180,31 @@ func handleBuildDict() {
 }
 
 func handleLoadDict() {
-	dict := ReadDictionary(fileDictionary)
+	dict := dawg.ReadDictionary(fileDictionary)
 	if dict == nil {
 		log.Fatalf("error: failed to read Dictionary\n")
 	}
 
-	var completer SomeCompleter
+	var completer dawg.SomeCompleter
 	if optRanked {
-		guide := ReadRankedGuide(fileDictionary)
+		guide := dawg.ReadRankedGuide(fileDictionary)
 		if guide == nil {
 			log.Fatalf("error: failed to read RankedGuide\n")
 		}
-		completer = NewRankedCompleter(dict, guide)
+		completer = dawg.NewRankedCompleter(dict, guide)
 	} else if optGuide {
-		guide := ReadGuide(fileDictionary)
+		guide := dawg.ReadGuide(fileDictionary)
 		if guide == nil {
 			log.Fatalf("error: failed to read Guide\n")
 		}
-		completer = NewCompleter(dict, guide)
+		completer = dawg.NewCompleter(dict, guide)
 	}
 
 	for scanner.Scan() {
 		var key string = scanner.Text()
 
 		fmt.Printf("%s:", key)
-		var index baseType = dict.Root()
+		var index uint32 = dict.Root()
 
 		if optRanked || optGuide {
 			if dict.FollowString(key, &index) {
@@ -266,36 +272,4 @@ func main() {
 	} else {
 		handleLoadDict()
 	}
-
-	/*
-		fmt.Println("hello world")
-
-		builder := NewDawgBuilder(-1)
-		fmt.Println("Inserting apple:", builder.InsertString("apple"))
-		fmt.Println("Inserting appliance:", builder.InsertString("appliance"))
-		fmt.Println("Inserting applied:", builder.InsertString("applied"))
-		fmt.Println("Inserting apply:", builder.InsertString("apply"))
-		fmt.Println("Inserting banana:", builder.InsertString("banana"))
-		fmt.Println("Inserting changed:", builder.InsertString("changed"))
-		fmt.Println("Inserting cherry:", builder.InsertString("cherry"))
-		fmt.Println("Inserting durian:", builder.InsertString("durian"))
-		fmt.Println("Inserting mandarin:", builder.InsertString("mandarin"))
-		fmt.Println("Inserting murdered:", builder.InsertString("murdered"))
-		fmt.Println("Inserting office:", builder.InsertString("office"))
-
-		dawg := NewDawg()
-		builder.Finish(dawg)
-
-		dict := dawg.Build()
-		fmt.Println("Contains apple:", dict.ContainsString("apple"))
-		fmt.Println("Contains cherry:", dict.ContainsString("cherry"))
-		fmt.Println("Contains durian:", dict.ContainsString("durian"))
-		fmt.Println("Contains green:", dict.ContainsString("green"))
-		fmt.Println("Contains mandarin:", dict.ContainsString("mandarin"))
-		fmt.Println("Contains applied:", dict.ContainsString("applied"))
-		fmt.Println("Contains murdered:", dict.ContainsString("murdered"))
-		fmt.Println("Contains changed:", dict.ContainsString("changed"))
-		fmt.Println("Contains appliance:", dict.ContainsString("appliance"))
-		fmt.Println("Contains change:", dict.ContainsString("change"))
-	*/
 }

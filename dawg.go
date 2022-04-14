@@ -1,4 +1,4 @@
-package main
+package dawg
 
 type Dawg struct {
 	basePool               []BaseUnit
@@ -28,12 +28,32 @@ func (dawg *Dawg) Root() baseType {
 }
 
 // Number of units.
-func (dawg *Dawg) size() sizeType {
+func (dawg *Dawg) Size() sizeType {
 	return len(dawg.basePool)
 }
 
+// Number of merging states.
+func (dawg *Dawg) NumOfMergingStates() sizeType {
+	return dawg.numOfMergingStates
+}
+
+// Number of merged states.
+func (dawg *Dawg) NumOfMergedStates() sizeType {
+	return dawg.numOfMergedStates
+}
+
+// Number of states.
+func (dawg *Dawg) NumOfStates() sizeType {
+	return dawg.numOfStates
+}
+
+// Number of merged transitions.
+func (dawg *Dawg) NumOfMergedTransitions() sizeType {
+	return dawg.numOfMergedTransitions
+}
+
 // Number of transitions.
-func (dawg *Dawg) numOfTransitions() sizeType {
+func (dawg *Dawg) NumOfTransitions() sizeType {
 	return len(dawg.basePool) - 1
 }
 

@@ -1,4 +1,4 @@
-package main
+package dawg
 
 const offsetMax = baseType(1) << 21
 const isLeafBit = baseType(1) << 31
@@ -57,4 +57,12 @@ func dictLabel(base DictionaryUnit) ucharType {
 // Reads an offset to child units from a non-leaf unit.
 func dictOffset(base DictionaryUnit) baseType {
 	return (base >> 10) << ((base & extensionBit) >> 6)
+}
+
+func dictHasExtBit(base DictionaryUnit) bool {
+	return (base & extensionBit) != 0
+}
+
+func dictIsLeaf(base DictionaryUnit) bool {
+	return (base & isLeafBit) != 0
 }
