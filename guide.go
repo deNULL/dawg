@@ -5,6 +5,19 @@ import (
 	"io"
 )
 
+type SomeGuide interface {
+	Size() sizeType
+	TotalSize() sizeType
+	FileSize() sizeType
+
+	Root() baseType
+	Child(baseType) ucharType
+	Sibling(baseType) ucharType
+
+	Read(io.Reader) bool
+	Write(io.Writer) bool
+}
+
 type Guide struct {
 	units []GuideUnit
 	size  sizeType

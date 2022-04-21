@@ -13,6 +13,16 @@ func (bb *byteBuffer) Follow(b byte) bool {
 	return true
 }
 
+// `offs`, `auxOffs` and `is21Bit` describe the current state.
+// `offs` is the start of the currently active window of Unicode codepoints.
+// `auxOffs` allows encoding 64 codepoints of the auxiliary alphabet.
+// `is21Bit` is true if we're in 21-bit mode (2-3 bytes per character).
+type UtfcState struct {
+	offs    int
+	auxOffs int
+	is21Bit bool
+}
+
 // All characters below this code point are considered Latin, so within this range the state of `offs` stays equal to 0
 const maxLatinCp = 0x02FF
 
@@ -113,156 +123,179 @@ func getAuxOffset(offs int) int {
 	return offs
 }
 
-// Calls Follow(byte) on the follower for each byte of the encoded string
-// Aborts if Follow returns false
-// Returns true if process was completed successfully, false otherwise
-// Allows to abort encoding early and prevent unneeded memory allocations
-func UtfcFollow(str string, f UtfcFollower) bool {
-	// `offs`, `auxOffs` and `is21Bit` describe the current state.
-	// `offs` is the start of the currently active window of Unicode codepoints.
-	// `auxOffs` allows encoding 64 codepoints of the auxiliary alphabet.
-	// `is21Bit` is true if we're in 21-bit mode (2-3 bytes per character).
-	offs := 0
-	auxOffs := offsInitAux
-	is21Bit := false
-	for _, ch := range str {
-		cp := int(ch)
-		// First, check if we can use 1-byte encoding via small 6-bit auxiliary alphabet
-		if auxOffs == 0 && inRanges(cp, rangesLatin) {
-			// 1 byte: auxiliary alphabet is Latin, rearrange it to fit 0xC0-0xFF range
-			if !f.Follow(byte(markerAux | encodeRanges(cp, rangesLatin))) {
-				return false
-			}
-		} else if auxOffs != 0 && cp >= auxOffs && cp <= auxOffs+0x3F {
-			// 1 byte: code point is within the auxiliary alphabet (non-Latin)
-			if !f.Follow(byte(markerAux | (cp - auxOffs))) {
-				return false
-			}
-		} else
-		// Second, there're 6 extra ranges (Hiragana, Katakana, and Emojis) that normally would require 3 bytes/character,
-		// but are encoded with 2 (using range of codepoints 0x10FFFF-0x1FFFFF, which are not covered by Unicode)
-		if inRanges(cp, rangesExtra) {
-			newOffs := cp & offsMask13Bit
-			if !is21Bit && newOffs == offs { // 1 byte: code point is within the current alphabet
-				lo := byte(cp & 0x7F)
-				if lo == 0 {
-					if !f.Follow(marker0) {
-						return false
-					}
-				} else {
-					if !f.Follow(lo) {
-						return false
-					}
+// Note: thread-unsafe
+var sharedState UtfcState
+var sharedBuffer = &byteBuffer{
+	buf: make([]byte, 0, 1024),
+}
+
+func NewUtfcState() *UtfcState {
+	return &UtfcState{
+		offs:    0,
+		auxOffs: offsInitAux,
+		is21Bit: false,
+	}
+}
+
+func (st *UtfcState) Clear() {
+	st.offs = 0
+	st.auxOffs = offsInitAux
+	st.is21Bit = false
+}
+
+func (st *UtfcState) Copy(src *UtfcState) {
+	st.offs = src.offs
+	st.auxOffs = src.auxOffs
+	st.is21Bit = src.is21Bit
+}
+
+func (st *UtfcState) Follow(ch rune, f UtfcFollower) bool {
+	cp := int(ch)
+	// First, check if we can use 1-byte encoding via small 6-bit auxiliary alphabet
+	if st.auxOffs == 0 && inRanges(cp, rangesLatin) {
+		// 1 byte: auxiliary alphabet is Latin, rearrange it to fit 0xC0-0xFF range
+		if !f.Follow(byte(markerAux | encodeRanges(cp, rangesLatin))) {
+			return false
+		}
+	} else if st.auxOffs != 0 && cp >= st.auxOffs && cp <= st.auxOffs+0x3F {
+		// 1 byte: code point is within the auxiliary alphabet (non-Latin)
+		if !f.Follow(byte(markerAux | (cp - st.auxOffs))) {
+			return false
+		}
+	} else
+	// Second, there're 6 extra ranges (Hiragana, Katakana, and Emojis) that normally would require 3 bytes/character,
+	// but are encoded with 2 (using range of codepoints 0x10FFFF-0x1FFFFF, which are not covered by Unicode)
+	if inRanges(cp, rangesExtra) {
+		newOffs := cp & offsMask13Bit
+		if !st.is21Bit && newOffs == st.offs { // 1 byte: code point is within the current alphabet
+			lo := byte(cp & 0x7F)
+			if lo == 0 {
+				if !f.Follow(marker0) {
+					return false
 				}
 			} else {
-				// Reindex 6 ranges into a single contiguous one
-				extra := encodeRanges(cp, rangesExtra)
-				lo := byte(extra)
-				if lo == 0 {
-					if !f.Follow(marker10) || !f.Follow(byte(markerExtra|(1+(extra>>8)))) {
-						return false
-					}
-				} else {
-					if !f.Follow(byte(markerExtra|(1+(extra>>8)))) || !f.Follow(lo) {
-						return false
-					}
-				}
-				if cp >= rangeHK[0] && cp < rangeHK[1] { // Only Hiragana and Katakana change the current alphabet
-					auxOffs = getAuxOffset(offs)
-					offs = newOffs
-					is21Bit = false
+				if !f.Follow(lo) {
+					return false
 				}
 			}
-		} else
-		// Lastly, check codepoint size to determine if it needs short (13-bit) or long (21-bit) mode
-		if cp >= min21BitCp {
-			// This code point requires 21 bit to encode
-			// Characters up to 0x2800 can be encoded in shorter forms, so we start from 0
-			cp -= min21BitCp
-			newOffs := cp & offsMask21Bit
-			if is21Bit && newOffs == offs { // 2 bytes: code point is within the current alphabet
-				hi := byte((cp >> 8) & 0x7F)
-				lo := byte(cp)
-				if hi == 0 && lo == 0 {
-					if !f.Follow(marker0) {
-						return false
-					}
-				} else if hi == 0 {
-					if !f.Follow(marker00) || !f.Follow(lo) {
-						return false
-					}
-				} else if lo == 0 {
-					if !f.Follow(marker10) || !f.Follow(hi) {
-						return false
-					}
-				} else {
-					if !f.Follow(hi) || !f.Follow(lo) {
-						return false
-					}
+		} else {
+			// Reindex 6 ranges into a single contiguous one
+			extra := encodeRanges(cp, rangesExtra)
+			lo := byte(extra)
+			if lo == 0 {
+				if !f.Follow(marker10) || !f.Follow(byte(markerExtra|(1+(extra>>8)))) {
+					return false
 				}
-			} else { // 3 bytes: we need to switch to the new alphabet
-				hi := byte(cp >> 8)
-				lo := byte(cp)
-				if hi == 0 && lo == 0 {
-					if !f.Follow(marker11) || !f.Follow(byte(marker21Bit|(cp>>16))) {
-						return false
-					}
-				} else if hi == 0 {
-					if !f.Follow(marker10) || !f.Follow(byte(marker21Bit|(cp>>16))) || !f.Follow(lo) {
-						return false
-					}
-				} else if lo == 0 {
-					if !f.Follow(marker01) || !f.Follow(byte(marker21Bit|(cp>>16))) || !f.Follow(hi) {
-						return false
-					}
-				} else {
-					if !f.Follow(byte(marker21Bit|(cp>>16))) || !f.Follow(hi) || !f.Follow(lo) {
-						return false
-					}
+			} else {
+				if !f.Follow(byte(markerExtra|(1+(extra>>8)))) || !f.Follow(lo) {
+					return false
 				}
-				auxOffs = offs
-				offs = newOffs
-				is21Bit = true
 			}
-		} else { // This code point requires max 13 bits to encode
-			newOffs := cp & offsMask13Bit
-			if !is21Bit && newOffs == offs { // 1 byte: code point is within the current alphabet
-				lo := byte(cp & 0x7F)
-				if lo == 0 {
-					if !f.Follow(marker0) {
-						return false
-					}
-				} else {
-					if !f.Follow(lo) {
-						return false
-					}
-				}
-			} else { // Final case: we need 2 bytes for this character
-				lo := byte(cp & 0xFF)
-				if lo == 0 {
-					if !f.Follow(marker10) || !f.Follow(byte(marker13Bit|(cp>>8))) {
-						return false
-					}
-				} else {
-					if !f.Follow(byte(marker13Bit|(cp>>8))) || !f.Follow(lo) {
-						return false
-					}
-				}
-				auxOffs = getAuxOffset(offs)
-				if cp <= maxLatinCp {
-					offs = 0
-				} else {
-					offs = newOffs
-				}
-				is21Bit = false
+			if cp >= rangeHK[0] && cp < rangeHK[1] { // Only Hiragana and Katakana change the current alphabet
+				st.auxOffs = getAuxOffset(st.offs)
+				st.offs = newOffs
+				st.is21Bit = false
 			}
+		}
+	} else
+	// Lastly, check codepoint size to determine if it needs short (13-bit) or long (21-bit) mode
+	if cp >= min21BitCp {
+		// This code point requires 21 bit to encode
+		// Characters up to 0x2800 can be encoded in shorter forms, so we start from 0
+		cp -= min21BitCp
+		newOffs := cp & offsMask21Bit
+		if st.is21Bit && newOffs == st.offs { // 2 bytes: code point is within the current alphabet
+			hi := byte((cp >> 8) & 0x7F)
+			lo := byte(cp)
+			if hi == 0 && lo == 0 {
+				if !f.Follow(marker0) {
+					return false
+				}
+			} else if hi == 0 {
+				if !f.Follow(marker00) || !f.Follow(lo) {
+					return false
+				}
+			} else if lo == 0 {
+				if !f.Follow(marker10) || !f.Follow(hi) {
+					return false
+				}
+			} else {
+				if !f.Follow(hi) || !f.Follow(lo) {
+					return false
+				}
+			}
+		} else { // 3 bytes: we need to switch to the new alphabet
+			hi := byte(cp >> 8)
+			lo := byte(cp)
+			if hi == 0 && lo == 0 {
+				if !f.Follow(marker11) || !f.Follow(byte(marker21Bit|(cp>>16))) {
+					return false
+				}
+			} else if hi == 0 {
+				if !f.Follow(marker10) || !f.Follow(byte(marker21Bit|(cp>>16))) || !f.Follow(lo) {
+					return false
+				}
+			} else if lo == 0 {
+				if !f.Follow(marker01) || !f.Follow(byte(marker21Bit|(cp>>16))) || !f.Follow(hi) {
+					return false
+				}
+			} else {
+				if !f.Follow(byte(marker21Bit|(cp>>16))) || !f.Follow(hi) || !f.Follow(lo) {
+					return false
+				}
+			}
+			st.auxOffs = st.offs
+			st.offs = newOffs
+			st.is21Bit = true
+		}
+	} else { // This code point requires max 13 bits to encode
+		newOffs := cp & offsMask13Bit
+		if !st.is21Bit && newOffs == st.offs { // 1 byte: code point is within the current alphabet
+			lo := byte(cp & 0x7F)
+			if lo == 0 {
+				if !f.Follow(marker0) {
+					return false
+				}
+			} else {
+				if !f.Follow(lo) {
+					return false
+				}
+			}
+		} else { // Final case: we need 2 bytes for this character
+			lo := byte(cp & 0xFF)
+			if lo == 0 {
+				if !f.Follow(marker10) || !f.Follow(byte(marker13Bit|(cp>>8))) {
+					return false
+				}
+			} else {
+				if !f.Follow(byte(marker13Bit|(cp>>8))) || !f.Follow(lo) {
+					return false
+				}
+			}
+			st.auxOffs = getAuxOffset(st.offs)
+			if cp <= maxLatinCp {
+				st.offs = 0
+			} else {
+				st.offs = newOffs
+			}
+			st.is21Bit = false
 		}
 	}
 	return true
 }
 
-var sharedBuffer = &byteBuffer{
-	buf: make([]byte, 0, 1024),
+// Calls Follow(byte) on the follower for each byte of the encoded string
+// Aborts if Follow returns false
+// Returns true if process was completed successfully, false otherwise
+// Allows to abort encoding early and prevent unneeded memory allocations
+func UtfcFollow(str string, f UtfcFollower) bool {
+	sharedState.Clear()
+	for _, ch := range str {
+		if !sharedState.Follow(ch, f) {
+			return false
+		}
+	}
+	return true
 }
 
 // UtfcEncode converts string to an UTF-C byte array

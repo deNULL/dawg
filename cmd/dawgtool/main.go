@@ -19,6 +19,7 @@ var optRanked bool
 var optBuild bool
 var optSort bool
 var optUtfc bool
+var optIndex bool
 
 var optLexicon string
 var optDictionary string
@@ -152,8 +153,9 @@ func handleBuildDict() {
 	}
 
 	// Builds a guide
+	var guide dawg.SomeGuide
 	if optRanked {
-		guide := dawg.BuildRankedGuide(d, dict)
+		guide = dawg.BuildRankedGuide(d, dict)
 		if guide == nil {
 			log.Fatalf("error: failed to build Guide\n")
 		}
@@ -165,7 +167,7 @@ func handleBuildDict() {
 			log.Fatalf("error: failed to write RankedGuide\n")
 		}
 	} else if optGuide {
-		guide := dawg.BuildGuide(d, dict)
+		guide = dawg.BuildGuide(d, dict)
 		if guide == nil {
 			log.Fatalf("error: failed to build Guide\n")
 		}
@@ -177,6 +179,20 @@ func handleBuildDict() {
 			log.Fatalf("error: failed to write Guide\n")
 		}
 	}
+
+	if guide != nil && optIndex {
+		index := dawg.BuildIndex(dict, guide)
+		if index == nil {
+			log.Fatalf("error: failed to build Index\n")
+		}
+
+		fmt.Printf("no. index units: %d\n", index.Size())
+		fmt.Printf("index size: %d\n", index.TotalSize())
+
+		if !index.Write(fileDictionary) {
+			log.Fatalf("error: failed to write Index\n")
+		}
+	}
 }
 
 func handleLoadDict() {
@@ -185,19 +201,31 @@ func handleLoadDict() {
 		log.Fatalf("error: failed to read Dictionary\n")
 	}
 
+	var guide dawg.SomeGuide
 	var completer dawg.SomeCompleter
 	if optRanked {
-		guide := dawg.ReadRankedGuide(fileDictionary)
-		if guide == nil {
+		var rguide = dawg.ReadRankedGuide(fileDictionary)
+		if rguide == nil {
 			log.Fatalf("error: failed to read RankedGuide\n")
 		}
-		completer = dawg.NewRankedCompleter(dict, guide)
+		completer = dawg.NewRankedCompleter(dict, rguide)
+		guide = rguide
 	} else if optGuide {
-		guide := dawg.ReadGuide(fileDictionary)
-		if guide == nil {
+		var sguide = dawg.ReadGuide(fileDictionary)
+		if sguide == nil {
 			log.Fatalf("error: failed to read Guide\n")
 		}
-		completer = dawg.NewCompleter(dict, guide)
+		completer = dawg.NewCompleter(dict, sguide)
+		guide = sguide
+	}
+
+	var indexer dawg.Indexer
+	if optIndex && guide != nil {
+		var index = dawg.ReadIndex(fileDictionary)
+		if index == nil {
+			log.Fatalf("error: failed to read Index\n")
+		}
+		indexer = *dawg.NewIndexer(dict, guide, index)
 	}
 
 	for scanner.Scan() {
@@ -207,6 +235,16 @@ func handleLoadDict() {
 		var index uint32 = dict.Root()
 
 		if optRanked || optGuide {
+			if optIndex {
+				var idx = indexer.StringToIndex(key)
+				if idx == dawg.NotFound {
+					fmt.Printf(" (not found)")
+				} else if idx == dawg.Failed {
+					fmt.Printf(" (failed)")
+				} else {
+					fmt.Printf(" (#%d)", idx)
+				}
+			}
 			if dict.FollowString(key, &index) {
 				completer.Start(index)
 				for completer.Next() {
@@ -227,6 +265,14 @@ func handleLoadDict() {
 		}
 		fmt.Println()
 	}
+
+	if optIndex {
+		fmt.Printf("Total words: %d\n", indexer.TotalCount())
+
+		for i := 0; i < int(indexer.TotalCount()); i++ {
+			fmt.Printf("%d: %s\n", i, indexer.IndexToString(uint32(i)))
+		}
+	}
 }
 
 func main() {
@@ -234,6 +280,7 @@ func main() {
 	flag.BoolVar(&optTab, "t", false, "handle tab as separator")
 	flag.BoolVar(&optGuide, "g", false, "build/load dictionary with guide")
 	flag.BoolVar(&optRanked, "r", false, "build/load dictionary with ranked guide")
+	flag.BoolVar(&optIndex, "i", false, "build/load dictionary with indices")
 	flag.BoolVar(&optSort, "s", false, "sort lexicon before building dict")
 	flag.BoolVar(&optUtfc, "u", false, "use utf-c instead of utf-8 for encoding keys")
 	flag.StringVar(&optLexicon, "l", "-", "lexicon file")

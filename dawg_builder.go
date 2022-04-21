@@ -199,7 +199,7 @@ func (db *DawgBuilder) fixUnits(index baseType) {
 		var unfixedIndex baseType = db.unfixedUnits[len(db.unfixedUnits)-1]
 		db.unfixedUnits = db.unfixedUnits[:len(db.unfixedUnits)-1]
 
-		if db.numOfStates >= len(db.hashTable)-len(db.hashTable)>>2 {
+		if db.numOfStates >= len(db.hashTable)-(len(db.hashTable)>>2) {
 			db.expandHashTable()
 		}
 
